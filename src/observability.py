@@ -22,13 +22,19 @@ from typing import Any
 from src.config import cfg
 
 # ── Bootstrap logging ──────────────────────────────────────────────────────────
+import sys
 cfg.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 _log_level = getattr(logging, cfg.LOG_LEVEL.upper(), logging.INFO)
-logging.basicConfig(
-    level=_log_level,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+# Use UTF-8 safe stream handler for Windows console compatibility
+_stream_handler = logging.StreamHandler(
+    stream=open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1, closefd=False)
+    if hasattr(sys.stdout, 'fileno') else sys.stdout
 )
+_stream_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+)
+logging.basicConfig(level=_log_level, handlers=[_stream_handler])
 logger = logging.getLogger("aster_row")
 
 # Debug JSONL log file

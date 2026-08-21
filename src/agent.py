@@ -405,6 +405,9 @@ def chat(
             "Please contact our support team for assistance."
         )
 
+    # ── Strip model thinking tags (Qwen3 emits <think>...</think>) ────────────
+    final_text = re.sub(r'<think>.*?</think>', '', final_text, flags=re.DOTALL).strip()
+
     # ── Output guardrail ───────────────────────────────────────────────────────
     output_check = check_output(final_text)
     if output_check["has_leak"]:

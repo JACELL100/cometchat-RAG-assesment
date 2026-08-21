@@ -103,7 +103,7 @@ pytest tests/ -v
 
 | Component | Choice | Rationale |
 |---|---|---|
-| **LLM** | Groq LLaMA 3.3 70B Versatile | Best free model with function-calling, 128K context, fast inference |
+| **LLM** | Groq Qwen3.6 27B (`qwen/qwen3.6-27b`) | Best available free model with native tool-calling support, 128K context |
 | **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` | Free, local, no API key, 384-dim, solid retrieval quality |
 | **Vector Store** | ChromaDB (persistent local) | Zero infrastructure, metadata filtering, cosine similarity |
 | **Web Framework** | FastAPI + uvicorn | Async, lightweight, auto-docs, great for APIs |
