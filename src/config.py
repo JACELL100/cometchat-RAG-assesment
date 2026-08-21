@@ -15,8 +15,8 @@ load_dotenv(_root / ".env")
 class Config:
     # ── Groq LLM ──────────────────────────────────────────────────────────────
     GROQ_API_KEY: str = os.environ["GROQ_API_KEY"]
-    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    GROQ_EVAL_MODEL: str = os.getenv("GROQ_EVAL_MODEL", "llama-3.1-8b-instant")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+    GROQ_EVAL_MODEL: str = os.getenv("GROQ_EVAL_MODEL", "openai/gpt-oss-20b")
 
     # ── Embeddings (local sentence-transformers) ───────────────────────────────
     EMBEDDING_MODEL: str = os.getenv(

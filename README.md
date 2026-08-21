@@ -63,8 +63,8 @@ The agent will be available at **http://127.0.0.1:8000**
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GROQ_API_KEY` | ✅ Yes | — | Your Groq API key |
-| `GROQ_MODEL` | No | `llama-3.3-70b-versatile` | LLM model for the agent |
-| `GROQ_EVAL_MODEL` | No | `llama-3.1-8b-instant` | Cheaper model for eval concept checks |
+| `GROQ_MODEL` | No | `qwen/qwen3.6-27b` | LLM model for the agent |
+| `GROQ_EVAL_MODEL` | No | `openai/gpt-oss-20b` | Cheaper model for eval concept checks |
 | `DEBUG` | No | `false` | Enable debug panel + verbose JSON logs |
 | `LOG_LEVEL` | No | `INFO` | Python log level |
 | `PORT` | No | `8000` | Server port |
