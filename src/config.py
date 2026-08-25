@@ -17,6 +17,8 @@ class Config:
     GROQ_API_KEY: str = os.environ["GROQ_API_KEY"]
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
     GROQ_EVAL_MODEL: str = os.getenv("GROQ_EVAL_MODEL", "openai/gpt-oss-20b")
+    GROQ_MAX_RETRIES: int = int(os.getenv("GROQ_MAX_RETRIES", "5"))
+    GROQ_RETRY_BASE_DELAY: float = float(os.getenv("GROQ_RETRY_BASE_DELAY", "10"))
 
     # ── Embeddings (local sentence-transformers) ───────────────────────────────
     EMBEDDING_MODEL: str = os.getenv(

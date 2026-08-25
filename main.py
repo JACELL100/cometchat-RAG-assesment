@@ -30,14 +30,24 @@ def main():
         "--rebuild-index", action="store_true",
         help="Force rebuild the vector index before starting."
     )
+    parser.add_argument(
+        "--no-index-check", action="store_true",
+        help="Skip the index presence check at startup (faster boot when index is already built)."
+    )
     args = parser.parse_args()
 
     # ── Build index if needed ──────────────────────────────────────────────────
-    collection = _get_collection()
-    if args.rebuild_index or collection.count() == 0:
+    if args.rebuild_index:
+        # Explicit rebuild requested — always run regardless of --no-index-check.
+        build_index(force_rebuild=True)
+    elif not args.no_index_check:
+        # Default: check if the collection is empty and auto-build on first run.
+        collection = _get_collection()
         if collection.count() == 0:
             logger.info("No index found — building now (first run)...")
-        build_index(force_rebuild=args.rebuild_index)
+            build_index(force_rebuild=False)
+    else:
+        logger.info("Skipping index check (--no-index-check). Assuming index is ready.")
 
     logger.info(
         "Starting Aster & Row Support Agent on http://%s:%d",

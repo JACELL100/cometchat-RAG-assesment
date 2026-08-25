@@ -18,7 +18,7 @@ import time
 import uuid
 from typing import Any
 
-from groq import Groq
+from groq import Groq, RateLimitError
 
 from src.config import cfg
 from src.guardrails import check_input, check_output, check_tool_result_for_injections
@@ -31,6 +31,35 @@ logger = logging.getLogger("aster_row.agent")
 
 # ── Groq client ────────────────────────────────────────────────────────────────
 _client = Groq(api_key=cfg.GROQ_API_KEY)
+
+
+def _groq_call_with_retry(**kwargs):
+    """
+    Call Groq chat completions with retry + exponential backoff on RateLimitError.
+    Parses the 'Retry-After' or 'Please try again in ...' from the error to determine wait time.
+    """
+    import re as _re
+    for attempt in range(cfg.GROQ_MAX_RETRIES):
+        try:
+            return _client.chat.completions.create(**kwargs)
+        except RateLimitError as e:
+            if attempt == cfg.GROQ_MAX_RETRIES - 1:
+                raise  # exhausted retries
+            # Try to parse wait time from error message
+            wait_time = cfg.GROQ_RETRY_BASE_DELAY * (2 ** attempt)
+            err_str = str(e)
+            match = _re.search(r'try again in (\d+)m([\d.]+)s', err_str)
+            if match:
+                wait_time = int(match.group(1)) * 60 + float(match.group(2)) + 1
+            else:
+                match = _re.search(r'try again in ([\d.]+)s', err_str)
+                if match:
+                    wait_time = float(match.group(1)) + 1
+            logger.warning(
+                "Rate limited (attempt %d/%d). Waiting %.1fs before retry...",
+                attempt + 1, cfg.GROQ_MAX_RETRIES, wait_time,
+            )
+            time.sleep(wait_time)
 
 # ── KB search tool definition ──────────────────────────────────────────────────
 KB_SEARCH_TOOL = {
@@ -117,7 +146,7 @@ def _compress_history(session_id: str, history: list[dict]) -> str:
         )
     )
     try:
-        resp = _client.chat.completions.create(
+        resp = _groq_call_with_retry(
             model=cfg.GROQ_MODEL,
             messages=[{"role": "user", "content": compress_prompt}],
             temperature=0.0,
@@ -204,8 +233,11 @@ def _execute_tool(
             if conflict and conflict_details:
                 result_dict["conflict_details"] = conflict_details
                 result_dict["conflict_note"] = (
-                    "WARNING: Active official documents conflict on this topic. "
-                    "Surface both sides and recommend human confirmation."
+                    "CRITICAL: Active official documents CONFLICT on this topic. "
+                    "You MUST present BOTH sides explicitly — state what Source A says AND what Source B says. "
+                    "Name both source filenames. Acknowledge the discrepancy. "
+                    "Recommend the safest interim guidance and recommend human confirmation. "
+                    "Do NOT silently choose one source over the other."
                 )
 
             result_str = json.dumps(result_dict, ensure_ascii=False)
@@ -258,17 +290,39 @@ _HANDOFF_SIGNALS = [
     "🤝",
 ]
 
-_SOURCE_PATTERN = re.compile(
-    r"📄\s*Source:\s*([^\n›]+?)(?:\s*›\s*([^\n]+))?(?:\n|$)"
-)
+# Multiple patterns to catch various citation formats the model may use
+_SOURCE_PATTERNS = [
+    # 📄 Source: filename.md › Section
+    re.compile(r"[📄📋]\s*Source:\s*([^\n›>|]+?)(?:\s*[›>|]\s*([^\n]+))?(?:\n|$)"),
+    # **Source:** filename.md › Section  or  Source: filename.md
+    re.compile(r"\*?\*?Source:?\*?\*?:?\s*([\w-]+\.md)(?:\s*[›>|]\s*([^\n]+))?(?:\n|$)"),
+    # > Source: filename.md  (blockquote style)
+    re.compile(r">\s*[📄📋]?\s*Source:\s*([^\n›>|]+?\.md)(?:\s*[›>|]\s*([^\n]+))?(?:\n|$)"),
+]
+
+# Fallback: find any XX-something.md filename pattern in the text
+_FILENAME_FALLBACK = re.compile(r"\b(\d{2}-[\w-]+\.md)\b")
 
 
 def _extract_sources(text: str) -> list[str]:
     sources = []
-    for m in _SOURCE_PATTERN.finditer(text):
-        filename = m.group(1).strip()
-        section = m.group(2).strip() if m.group(2) else ""
-        sources.append(f"{filename} › {section}" if section else filename)
+    seen = set()
+    # Try each pattern
+    for pattern in _SOURCE_PATTERNS:
+        for m in pattern.finditer(text):
+            filename = m.group(1).strip().strip('`').strip('*').strip()
+            section = m.group(2).strip() if m.group(2) else ""
+            key = filename.lower()
+            if key not in seen:
+                seen.add(key)
+                sources.append(f"{filename} › {section}" if section else filename)
+    # Fallback: extract .md filenames directly from response
+    if not sources:
+        for m in _FILENAME_FALLBACK.finditer(text):
+            fn = m.group(1)
+            if fn.lower() not in seen:
+                seen.add(fn.lower())
+                sources.append(fn)
     return sources
 
 
@@ -347,7 +401,7 @@ def chat(
 
     for iteration in range(max_iterations):
         try:
-            response = _client.chat.completions.create(
+            response = _groq_call_with_retry(
                 model=cfg.GROQ_MODEL,
                 messages=messages,
                 tools=ALL_TOOLS,
@@ -407,6 +461,55 @@ def chat(
 
     # ── Strip model thinking tags (Qwen3 emits <think>...</think>) ────────────
     final_text = re.sub(r'<think>.*?</think>', '', final_text, flags=re.DOTALL).strip()
+
+    # ── Fallback: if response is empty and no tools were called, auto-search KB ──
+    if not final_text and not tool_call_logs:
+        logger.warning("session=%s | Empty response with no tool calls. Auto-triggering KB search.", session_id)
+        # Perform a KB search with the user's message
+        result_str, log_record = _execute_tool(
+            "search_knowledge_base",
+            {"query": user_message},
+            session_id,
+            retrieval_state,
+        )
+        tool_call_logs.append(log_record)
+
+        # Ask the model again with the KB results
+        messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "auto_kb_search",
+                "type": "function",
+                "function": {
+                    "name": "search_knowledge_base",
+                    "arguments": json.dumps({"query": user_message}),
+                },
+            }],
+        })
+        messages.append({
+            "role": "tool",
+            "tool_call_id": "auto_kb_search",
+            "content": result_str,
+        })
+
+        try:
+            response = _groq_call_with_retry(
+                model=cfg.GROQ_MODEL,
+                messages=messages,
+                tools=ALL_TOOLS,
+                tool_choice="none",
+                temperature=0.1,
+                max_tokens=1024,
+            )
+            final_text = response.choices[0].message.content or ""
+            final_text = re.sub(r'<think>.*?</think>', '', final_text, flags=re.DOTALL).strip()
+        except Exception as e:
+            logger.error("session=%s | Fallback KB search also failed: %s", session_id, e)
+            final_text = (
+                "I'm experiencing a technical issue. "
+                "Please try again or contact our support team directly."
+            )
 
     # ── Output guardrail ───────────────────────────────────────────────────────
     output_check = check_output(final_text)

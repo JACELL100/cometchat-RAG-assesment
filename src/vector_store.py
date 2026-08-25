@@ -15,7 +15,6 @@ from typing import Any
 
 import chromadb
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
 
 from src.config import cfg
 from src.document_loader import load_all_documents
@@ -23,12 +22,16 @@ from src.document_loader import load_all_documents
 logger = logging.getLogger("aster_row.vector_store")
 
 # ── Singleton embedding model ──────────────────────────────────────────────────
-_embedder: SentenceTransformer | None = None
+_embedder = None
 
 
-def _get_embedder() -> SentenceTransformer:
+def _get_embedder():
+    """Lazy-load the SentenceTransformer model on first use."""
     global _embedder
     if _embedder is None:
+        # Import is deferred here so startup doesn't pay the cost unless the
+        # embedder is actually needed (i.e. index is empty or a query arrives).
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
         logger.info("Loading embedding model: %s", cfg.EMBEDDING_MODEL)
         _embedder = SentenceTransformer(cfg.EMBEDDING_MODEL)
     return _embedder
