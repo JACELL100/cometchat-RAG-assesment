@@ -6,7 +6,7 @@
 
 ## Demo
 
-> 🎬 **[Click to watch the demo video](./demo.gif)**
+> 🎬 **[Click to watch the demo video](https://drive.google.com/file/d/1JQxirePoPEJ0UuOC5MZ7TOau4HwXb623/view?usp=drive_link)**
 >
 > The demo shows:
 > - A knowledge-base question with citations
